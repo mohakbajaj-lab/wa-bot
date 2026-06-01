@@ -1,0 +1,186 @@
+from fastapi import FastAPI, Request, Query
+from fastapi.responses import PlainTextResponse
+import httpx
+import os
+
+app = FastAPI()
+
+VERIFY_TOKEN = os.environ["VERIFY_TOKEN"]
+WHATSAPP_TOKEN = os.environ["WHATSAPP_TOKEN"]
+PHONE_NUMBER_ID = os.environ["PHONE_NUMBER_ID"]
+
+user_sessions = {}
+
+@app.get("/webhook")
+async def verify(
+    hub_mode: str = Query(alias="hub.mode"),
+    hub_token: str = Query(alias="hub.verify_token"),
+    hub_challenge: str = Query(alias="hub.challenge")
+):
+    if hub_mode == "subscribe" and hub_token == VERIFY_TOKEN:
+        return PlainTextResponse(hub_challenge)
+    return PlainTextResponse("Forbidden", status_code=403)
+
+@app.post("/webhook")
+async def receive_message(request: Request):
+    body = await request.json()
+    try:
+        for entry in body.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                messages = value.get("messages", [])
+                for message in messages:
+                    from_number = message["from"]
+                    msg_type = message["type"]
+                    if msg_type == "text":
+                        user_text = message["text"]["body"]
+                        await handle_text(from_number, user_text)
+                    elif msg_type == "interactive":
+                        interactive = message["interactive"]
+                        if interactive["type"] == "button_reply":
+                            await handle_button(from_number, interactive["button_reply"]["id"])
+                        elif interactive["type"] == "list_reply":
+                            await handle_list_reply(from_number, interactive["list_reply"]["id"])
+    except Exception as e:
+        print(f"Error: {e}")
+    return {"status": "ok"}
+
+async def handle_text(phone: str, text: str):
+    text = text.strip().lower()
+    if text in ["hi", "hello", "hey", "start"]:
+        user_sessions[phone] = {"step": "main_menu"}
+        await send_list_message(phone)
+    else:
+        from claude_handler import get_claude_response
+        response = await get_claude_response(text)
+        await send_text(phone, response)
+
+async def handle_list_reply(phone: str, list_id: str):
+    if list_id == "colleges":
+        user_sessions[phone] = {"step": "college_state"}
+        await send_buttons(phone, "Which state?", [
+            ("Delhi", "state_delhi"),
+            ("Maharashtra", "state_mh"),
+            ("Gujarat", "state_gj")
+        ])
+    elif list_id == "exams":
+        user_sessions[phone] = {"step": "exam_type"}
+        await send_buttons(phone, "Which exam type?", [
+            ("Engineering", "exam_engg"),
+            ("Medical", "exam_med"),
+            ("Management", "exam_mgmt")
+        ])
+    elif list_id == "courses":
+        await send_text(phone, "Which course are you looking for? (e.g. B.Tech CSE, MBA, MBBS)")
+        user_sessions[phone] = {"step": "course_query"}
+
+async def handle_button(phone: str, button_id: str):
+    if button_id == "state_delhi":
+        await send_text(phone,
+            "Top colleges in Delhi:\n\n"
+            "1. IIT Delhi\n2. DTU\n3. NSIT\n4. IP University\n5. Jamia Millia\n\n"
+            "Visit collegedunia.com for detailed reviews, cutoffs & fees."
+        )
+        user_sessions[phone] = {"step": "start"}
+    elif button_id == "state_mh":
+        await send_text(phone,
+            "Top colleges in Maharashtra:\n\n"
+            "1. IIT Bombay\n2. COEP Pune\n3. VJTI Mumbai\n4. ICT Mumbai\n5. SPPU\n\n"
+            "Visit collegedunia.com for detailed reviews, cutoffs & fees."
+        )
+        user_sessions[phone] = {"step": "start"}
+    elif button_id == "state_gj":
+        await send_text(phone,
+            "Top colleges in Gujarat:\n\n"
+            "1. NIT Surat\n2. DAIICT\n3. MS University\n4. LDCE Ahmedabad\n5. GCET\n\n"
+            "Visit collegedunia.com for detailed reviews, cutoffs & fees."
+        )
+        user_sessions[phone] = {"step": "start"}
+    elif button_id == "exam_engg":
+        await send_text(phone,
+            "Engineering Exams:\n\n"
+            "1. JEE Main\n2. JEE Advanced\n3. GUJCET\n4. MHT CET\n5. BITSAT\n\n"
+            "Visit collegedunia.com for exam dates, syllabus & cutoffs."
+        )
+        user_sessions[phone] = {"step": "start"}
+    elif button_id == "exam_med":
+        await send_text(phone,
+            "Medical Exams:\n\n"
+            "1. NEET UG\n2. NEET PG\n3. AIIMS\n4. JIPMER\n\n"
+            "Visit collegedunia.com for exam dates, syllabus & cutoffs."
+        )
+        user_sessions[phone] = {"step": "start"}
+    elif button_id == "exam_mgmt":
+        await send_text(phone,
+            "Management Exams:\n\n"
+            "1. CAT\n2. XAT\n3. MAT\n4. SNAP\n5. NMAT\n\n"
+            "Visit collegedunia.com for exam dates, syllabus & cutoffs."
+        )
+        user_sessions[phone] = {"step": "start"}
+
+BASE_URL = "https://graph.facebook.com/v19.0"
+
+async def send_text(phone: str, message: str):
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            f"{BASE_URL}/{PHONE_NUMBER_ID}/messages",
+            headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "text",
+                "text": {"body": message}
+            }
+        )
+
+async def send_list_message(phone: str):
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            f"{BASE_URL}/{PHONE_NUMBER_ID}/messages",
+            headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "interactive",
+                "interactive": {
+                    "type": "list",
+                    "header": {"type": "text", "text": "Collegedunia Assistant"},
+                    "body": {"text": "Hi! What are you looking for today?"},
+                    "footer": {"text": "Powered by Collegedunia"},
+                    "action": {
+                        "button": "Browse Options",
+                        "sections": [{
+                            "title": "Categories",
+                            "rows": [
+                                {"id": "colleges", "title": "Colleges", "description": "Find colleges by state, stream"},
+                                {"id": "exams", "title": "Exams", "description": "JEE, NEET, CAT, GUJCET & more"},
+                                {"id": "courses", "title": "Courses", "description": "B.Tech, MBA, MBBS, B.Com..."},
+                                {"id": "cutoffs", "title": "Cutoffs", "description": "Latest cutoff data"},
+                                {"id": "studyabroad", "title": "Study Abroad", "description": "International college info"}
+                            ]
+                        }]
+                    }
+                }
+            }
+        )
+
+async def send_buttons(phone: str, body_text: str, buttons: list):
+    button_list = [
+        {"type": "reply", "reply": {"id": btn_id, "title": btn_label}}
+        for btn_label, btn_id in buttons
+    ]
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            f"{BASE_URL}/{PHONE_NUMBER_ID}/messages",
+            headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": body_text},
+                    "action": {"buttons": button_list}
+                }
+            }
+        )
