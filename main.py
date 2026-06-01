@@ -47,13 +47,21 @@ async def receive_message(request: Request):
 
 async def handle_text(phone: str, text: str):
     text = text.strip().lower()
+    session = user_sessions.get(phone, {"step": "start"})
+
     if text in ["hi", "hello", "hey", "start"]:
         user_sessions[phone] = {"step": "main_menu"}
         await send_list_message(phone)
+    elif session.get("step") == "course_query":
+        await send_text(phone,
+            f"For courses like '{text}', visit collegedunia.com and search directly for the most updated listings, fees and cutoffs."
+        )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type 'hi' to go back to the main menu.")
     else:
-        from claude_handler import get_claude_response
-        response = await get_claude_response(text)
-        await send_text(phone, response)
+        await send_text(phone,
+            "Sorry, I didn't understand that. Type 'hi' to see the main menu."
+        )
 
 async def handle_list_reply(phone: str, list_id: str):
     if list_id == "colleges":
@@ -73,50 +81,74 @@ async def handle_list_reply(phone: str, list_id: str):
     elif list_id == "courses":
         await send_text(phone, "Which course are you looking for? (e.g. B.Tech CSE, MBA, MBBS)")
         user_sessions[phone] = {"step": "course_query"}
+    elif list_id == "cutoffs":
+        await send_buttons(phone, "Cutoffs for which exam?", [
+            ("JEE Main", "cutoff_jee"),
+            ("NEET", "cutoff_neet"),
+            ("CAT", "cutoff_cat")
+        ])
+    elif list_id == "studyabroad":
+        await send_text(phone,
+            "For Study Abroad guidance, visit:\n\ncollgedunia.com/study-abroad\n\nCovers USA, UK, Canada, Australia, Germany & more."
+        )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type 'hi' to go back to the main menu.")
 
 async def handle_button(phone: str, button_id: str):
-    if button_id == "state_delhi":
-        await send_text(phone,
+    responses = {
+        "state_delhi": (
             "Top colleges in Delhi:\n\n"
             "1. IIT Delhi\n2. DTU\n3. NSIT\n4. IP University\n5. Jamia Millia\n\n"
-            "Visit collegedunia.com for detailed reviews, cutoffs & fees."
-        )
-        user_sessions[phone] = {"step": "start"}
-    elif button_id == "state_mh":
-        await send_text(phone,
+            "collegedunia.com for reviews, cutoffs & fees."
+        ),
+        "state_mh": (
             "Top colleges in Maharashtra:\n\n"
             "1. IIT Bombay\n2. COEP Pune\n3. VJTI Mumbai\n4. ICT Mumbai\n5. SPPU\n\n"
-            "Visit collegedunia.com for detailed reviews, cutoffs & fees."
-        )
-        user_sessions[phone] = {"step": "start"}
-    elif button_id == "state_gj":
-        await send_text(phone,
+            "collegedunia.com for reviews, cutoffs & fees."
+        ),
+        "state_gj": (
             "Top colleges in Gujarat:\n\n"
             "1. NIT Surat\n2. DAIICT\n3. MS University\n4. LDCE Ahmedabad\n5. GCET\n\n"
-            "Visit collegedunia.com for detailed reviews, cutoffs & fees."
-        )
-        user_sessions[phone] = {"step": "start"}
-    elif button_id == "exam_engg":
-        await send_text(phone,
+            "collegedunia.com for reviews, cutoffs & fees."
+        ),
+        "exam_engg": (
             "Engineering Exams:\n\n"
             "1. JEE Main\n2. JEE Advanced\n3. GUJCET\n4. MHT CET\n5. BITSAT\n\n"
-            "Visit collegedunia.com for exam dates, syllabus & cutoffs."
-        )
-        user_sessions[phone] = {"step": "start"}
-    elif button_id == "exam_med":
-        await send_text(phone,
+            "collegedunia.com for dates, syllabus & cutoffs."
+        ),
+        "exam_med": (
             "Medical Exams:\n\n"
             "1. NEET UG\n2. NEET PG\n3. AIIMS\n4. JIPMER\n\n"
-            "Visit collegedunia.com for exam dates, syllabus & cutoffs."
-        )
-        user_sessions[phone] = {"step": "start"}
-    elif button_id == "exam_mgmt":
-        await send_text(phone,
+            "collegedunia.com for dates, syllabus & cutoffs."
+        ),
+        "exam_mgmt": (
             "Management Exams:\n\n"
             "1. CAT\n2. XAT\n3. MAT\n4. SNAP\n5. NMAT\n\n"
-            "Visit collegedunia.com for exam dates, syllabus & cutoffs."
-        )
+            "collegedunia.com for dates, syllabus & cutoffs."
+        ),
+        "cutoff_jee": (
+            "JEE Main 2024 Cutoffs (General):\n\n"
+            "NIT Trichy CSE: 97.5+\nDTU: 96+\nNSIT: 97+\nNIT Warangal CSE: 97+\n\n"
+            "collegedunia.com for full cutoff lists."
+        ),
+        "cutoff_neet": (
+            "NEET 2024 Cutoffs (General):\n\n"
+            "AIIMS Delhi: 715+\nMaulana Azad: 650+\nGrant Medical: 620+\n\n"
+            "collegedunia.com for full cutoff lists."
+        ),
+        "cutoff_cat": (
+            "CAT 2024 Cutoffs (General):\n\n"
+            "IIM Ahmedabad: 99.5+\nIIM Bangalore: 99+\nIIM Calcutta: 99+\nIIM Lucknow: 97+\n\n"
+            "collegedunia.com for full cutoff lists."
+        ),
+    }
+
+    if button_id in responses:
+        await send_text(phone, responses[button_id])
         user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type 'hi' to go back to the main menu.")
+    else:
+        await send_text(phone, "Type 'hi' to see the main menu.")
 
 BASE_URL = "https://graph.facebook.com/v19.0"
 
