@@ -215,5 +215,4 @@ async def send_buttons(phone: str, body_text: str, buttons: list):
                     "action": {"buttons": button_list}
                 }
             }
-        
-        
+        )
