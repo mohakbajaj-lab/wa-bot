@@ -13,9 +13,9 @@ user_sessions = {}
 
 @app.get("/webhook")
 async def verify(
-    hub_mode: str = Query(alias="hub.mode"),
-    hub_token: str = Query(alias="hub.verify_token"),
-    hub_challenge: str = Query(alias="hub.challenge")
+    hub_mode: str = Query(default=None, alias="hub.mode"),
+    hub_token: str = Query(default=None, alias="hub.verify_token"),
+    hub_challenge: str = Query(default=None, alias="hub.challenge")
 ):
     if hub_mode == "subscribe" and hub_token == VERIFY_TOKEN:
         return PlainTextResponse(hub_challenge)
@@ -89,7 +89,7 @@ async def handle_list_reply(phone: str, list_id: str):
         ])
     elif list_id == "studyabroad":
         await send_text(phone,
-            "For Study Abroad guidance, visit:\n\ncollgedunia.com/study-abroad\n\nCovers USA, UK, Canada, Australia, Germany & more."
+            "For Study Abroad guidance, visit:\n\ncollegedunia.com/study-abroad\n\nCovers USA, UK, Canada, Australia, Germany & more."
         )
         user_sessions[phone] = {"step": "start"}
         await send_text(phone, "Type 'hi' to go back to the main menu.")
@@ -215,4 +215,5 @@ async def send_buttons(phone: str, body_text: str, buttons: list):
                     "action": {"buttons": button_list}
                 }
             }
-        )
+        
+        
