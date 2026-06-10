@@ -13,9 +13,9 @@ user_sessions = {}
 
 @app.get("/webhook")
 async def verify(
-    hub_mode: str = Query(default=None, alias="hub.mode"),
-    hub_token: str = Query(default=None, alias="hub.verify_token"),
-    hub_challenge: str = Query(default=None, alias="hub.challenge")
+    hub_mode: str = Query(alias="hub.mode"),
+    hub_token: str = Query(alias="hub.verify_token"),
+    hub_challenge: str = Query(alias="hub.challenge")
 ):
     if hub_mode == "subscribe" and hub_token == VERIFY_TOKEN:
         return PlainTextResponse(hub_challenge)
@@ -45,110 +45,139 @@ async def receive_message(request: Request):
         print(f"Error: {e}")
     return {"status": "ok"}
 
-async def handle_text(phone: str, text: str):
-    text = text.strip().lower()
-    session = user_sessions.get(phone, {"step": "start"})
 
-    if text in ["hi", "hello", "hey", "start"]:
-        user_sessions[phone] = {"step": "main_menu"}
-        await send_list_message(phone)
-    elif session.get("step") == "course_query":
+async def handle_text(phone: str, text: str):
+    text_clean = text.strip()
+    session = user_sessions.get(phone, {"step": "start"})
+    step = session.get("step", "start")
+
+    if text_clean.lower() in ["hi", "hello", "hey", "start"] or step == "start":
+        user_sessions[phone] = {"step": "awaiting_name_city"}
         await send_text(phone,
-            f"For courses like '{text}', visit collegedunia.com and search directly for the most updated listings, fees and cutoffs."
+            "👋 Welcome to *Collegedunia* — India's leading college discovery platform!\n\n"
+            "To help you better, please share your *name and city*.\n\n"
+            "_Example: Rahul, Delhi_"
+        )
+
+    elif step == "awaiting_name_city":
+        user_sessions[phone] = {"step": "main_menu", "name_city": text_clean}
+        name = text_clean.split(",")[0].strip()
+        await send_text(phone, f"Thanks, {name}! 😊")
+        await send_main_menu(phone)
+
+    elif step == "awaiting_exam_query":
+        await send_text(phone,
+            f"Got it! For your query: *\"{text_clean}\"*\n\n"
+            "Our team will get back to you shortly, or visit 👉 collegedunia.com/exams"
         )
         user_sessions[phone] = {"step": "start"}
-        await send_text(phone, "Type 'hi' to go back to the main menu.")
-    else:
+        await send_text(phone, "Type *hi* to go back to the main menu.")
+
+    elif step == "awaiting_course_query":
         await send_text(phone,
-            "Sorry, I didn't understand that. Type 'hi' to see the main menu."
+            f"Got it! For your query: *\"{text_clean}\"*\n\n"
+            "Our team will get back to you shortly, or visit 👉 collegedunia.com/courses"
         )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type *hi* to go back to the main menu.")
+
+    elif step == "awaiting_college_query":
+        await send_text(phone,
+            f"Got it! For your query: *\"{text_clean}\"*\n\n"
+            "Our team will get back to you shortly, or visit 👉 collegedunia.com"
+        )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type *hi* to go back to the main menu.")
+
+    elif step == "awaiting_class10_query":
+        await send_text(phone,
+            f"Got it! For your query: *\"{text_clean}\"*\n\n"
+            "Our team will get back to you shortly, or visit 👉 collegedunia.com"
+        )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type *hi* to go back to the main menu.")
+
+    elif step == "awaiting_class12_query":
+        await send_text(phone,
+            f"Got it! For your query: *\"{text_clean}\"*\n\n"
+            "Our team will get back to you shortly, or visit 👉 collegedunia.com"
+        )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type *hi* to go back to the main menu.")
+
+    elif step == "awaiting_studyabroad_query":
+        await send_text(phone,
+            f"Got it! For your query: *\"{text_clean}\"*\n\n"
+            "Our team will get back to you shortly, or visit 👉 collegedunia.com/study-abroad"
+        )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type *hi* to go back to the main menu.")
+
+    elif step == "awaiting_other_query":
+        await send_text(phone,
+            f"Got it! For your query: *\"{text_clean}\"*\n\n"
+            "Our team will get back to you shortly. 😊"
+        )
+        user_sessions[phone] = {"step": "start"}
+        await send_text(phone, "Type *hi* to go back to the main menu.")
+
+    else:
+        await send_text(phone, "Type *hi* to see the main menu.")
+
 
 async def handle_list_reply(phone: str, list_id: str):
-    if list_id == "colleges":
-        user_sessions[phone] = {"step": "college_state"}
-        await send_buttons(phone, "Which state?", [
-            ("Delhi", "state_delhi"),
-            ("Maharashtra", "state_mh"),
-            ("Gujarat", "state_gj")
-        ])
-    elif list_id == "exams":
-        user_sessions[phone] = {"step": "exam_type"}
-        await send_buttons(phone, "Which exam type?", [
-            ("Engineering", "exam_engg"),
-            ("Medical", "exam_med"),
-            ("Management", "exam_mgmt")
-        ])
-    elif list_id == "courses":
-        await send_text(phone, "Which course are you looking for? (e.g. B.Tech CSE, MBA, MBBS)")
-        user_sessions[phone] = {"step": "course_query"}
-    elif list_id == "cutoffs":
-        await send_buttons(phone, "Cutoffs for which exam?", [
-            ("JEE Main", "cutoff_jee"),
-            ("NEET", "cutoff_neet"),
-            ("CAT", "cutoff_cat")
-        ])
-    elif list_id == "studyabroad":
+    if list_id == "exams":
+        user_sessions[phone] = {"step": "awaiting_exam_query"}
         await send_text(phone,
-            "For Study Abroad guidance, visit:\n\ncollegedunia.com/study-abroad\n\nCovers USA, UK, Canada, Australia, Germany & more."
+            "📚 *Exams*\n\nPlease type your exam-related query below.\n\n"
+            "_Example: JEE Main 2025 dates, NEET cutoffs, CAT eligibility_"
         )
-        user_sessions[phone] = {"step": "start"}
-        await send_text(phone, "Type 'hi' to go back to the main menu.")
+
+    elif list_id == "courses":
+        user_sessions[phone] = {"step": "awaiting_course_query"}
+        await send_text(phone,
+            "🎓 *Courses & Programs*\n\nPlease type your course-related query below.\n\n"
+            "_Example: B.Tech CSE fees, MBA colleges in Mumbai, MBBS admission_"
+        )
+
+    elif list_id == "colleges":
+        user_sessions[phone] = {"step": "awaiting_college_query"}
+        await send_text(phone,
+            "🏫 *Colleges*\n\nPlease type your college-related query below.\n\n"
+            "_Example: Top engineering colleges in Delhi, NIT Trichy reviews_"
+        )
+
+    elif list_id == "class10":
+        user_sessions[phone] = {"step": "awaiting_class10_query"}
+        await send_text(phone,
+            "📖 *Class 10th*\n\nPlease type your query below.\n\n"
+            "_Example: Best schools after 10th, stream selection, scholarship options_"
+        )
+
+    elif list_id == "class12":
+        user_sessions[phone] = {"step": "awaiting_class12_query"}
+        await send_text(phone,
+            "📖 *Class 12th*\n\nPlease type your query below.\n\n"
+            "_Example: Colleges accepting 12th marks, direct admission, cutoffs_"
+        )
+
+    elif list_id == "studyabroad":
+        user_sessions[phone] = {"step": "awaiting_studyabroad_query"}
+        await send_text(phone,
+            "✈️ *Study Abroad*\n\nPlease type your query below.\n\n"
+            "_Example: MS in USA, MBA in UK, scholarships for Indian students_"
+        )
+
+    elif list_id == "other":
+        user_sessions[phone] = {"step": "awaiting_other_query"}
+        await send_text(phone,
+            "💬 *Something Else*\n\nPlease type your query below and our team will help you out!"
+        )
+
 
 async def handle_button(phone: str, button_id: str):
-    responses = {
-        "state_delhi": (
-            "Top colleges in Delhi:\n\n"
-            "1. IIT Delhi\n2. DTU\n3. NSIT\n4. IP University\n5. Jamia Millia\n\n"
-            "collegedunia.com for reviews, cutoffs & fees."
-        ),
-        "state_mh": (
-            "Top colleges in Maharashtra:\n\n"
-            "1. IIT Bombay\n2. COEP Pune\n3. VJTI Mumbai\n4. ICT Mumbai\n5. SPPU\n\n"
-            "collegedunia.com for reviews, cutoffs & fees."
-        ),
-        "state_gj": (
-            "Top colleges in Gujarat:\n\n"
-            "1. NIT Surat\n2. DAIICT\n3. MS University\n4. LDCE Ahmedabad\n5. GCET\n\n"
-            "collegedunia.com for reviews, cutoffs & fees."
-        ),
-        "exam_engg": (
-            "Engineering Exams:\n\n"
-            "1. JEE Main\n2. JEE Advanced\n3. GUJCET\n4. MHT CET\n5. BITSAT\n\n"
-            "collegedunia.com for dates, syllabus & cutoffs."
-        ),
-        "exam_med": (
-            "Medical Exams:\n\n"
-            "1. NEET UG\n2. NEET PG\n3. AIIMS\n4. JIPMER\n\n"
-            "collegedunia.com for dates, syllabus & cutoffs."
-        ),
-        "exam_mgmt": (
-            "Management Exams:\n\n"
-            "1. CAT\n2. XAT\n3. MAT\n4. SNAP\n5. NMAT\n\n"
-            "collegedunia.com for dates, syllabus & cutoffs."
-        ),
-        "cutoff_jee": (
-            "JEE Main 2024 Cutoffs (General):\n\n"
-            "NIT Trichy CSE: 97.5+\nDTU: 96+\nNSIT: 97+\nNIT Warangal CSE: 97+\n\n"
-            "collegedunia.com for full cutoff lists."
-        ),
-        "cutoff_neet": (
-            "NEET 2024 Cutoffs (General):\n\n"
-            "AIIMS Delhi: 715+\nMaulana Azad: 650+\nGrant Medical: 620+\n\n"
-            "collegedunia.com for full cutoff lists."
-        ),
-        "cutoff_cat": (
-            "CAT 2024 Cutoffs (General):\n\n"
-            "IIM Ahmedabad: 99.5+\nIIM Bangalore: 99+\nIIM Calcutta: 99+\nIIM Lucknow: 97+\n\n"
-            "collegedunia.com for full cutoff lists."
-        ),
-    }
+    await send_text(phone, "Type *hi* to see the main menu.")
 
-    if button_id in responses:
-        await send_text(phone, responses[button_id])
-        user_sessions[phone] = {"step": "start"}
-        await send_text(phone, "Type 'hi' to go back to the main menu.")
-    else:
-        await send_text(phone, "Type 'hi' to see the main menu.")
 
 BASE_URL = "https://graph.facebook.com/v19.0"
 
@@ -165,7 +194,7 @@ async def send_text(phone: str, message: str):
             }
         )
 
-async def send_list_message(phone: str):
+async def send_main_menu(phone: str):
     async with httpx.AsyncClient() as client:
         await client.post(
             f"{BASE_URL}/{PHONE_NUMBER_ID}/messages",
@@ -176,43 +205,24 @@ async def send_list_message(phone: str):
                 "type": "interactive",
                 "interactive": {
                     "type": "list",
-                    "header": {"type": "text", "text": "Collegedunia Assistant"},
-                    "body": {"text": "Hi! What are you looking for today?"},
+                    "header": {"type": "text", "text": "Collegedunia Assistant 🎓"},
+                    "body": {"text": "Kindly select your desired option below 👇"},
                     "footer": {"text": "Powered by Collegedunia"},
                     "action": {
-                        "button": "Browse Options",
+                        "button": "View Options",
                         "sections": [{
-                            "title": "Categories",
+                            "title": "What are you looking for?",
                             "rows": [
-                                {"id": "colleges", "title": "Colleges", "description": "Find colleges by state, stream"},
-                                {"id": "exams", "title": "Exams", "description": "JEE, NEET, CAT, GUJCET & more"},
-                                {"id": "courses", "title": "Courses", "description": "B.Tech, MBA, MBBS, B.Com..."},
-                                {"id": "cutoffs", "title": "Cutoffs", "description": "Latest cutoff data"},
-                                {"id": "studyabroad", "title": "Study Abroad", "description": "International college info"}
+                                {"id": "exams", "title": "📚 Exams", "description": "JEE, NEET, CAT, GUJCET & more"},
+                                {"id": "courses", "title": "🎓 Courses & Programs", "description": "B.Tech, MBA, MBBS, B.Com..."},
+                                {"id": "colleges", "title": "🏫 Colleges", "description": "Find colleges by state & stream"},
+                                {"id": "class10", "title": "📖 Class 10th", "description": "Stream selection, schools & more"},
+                                {"id": "class12", "title": "📖 Class 12th", "description": "Admissions, cutoffs & colleges"},
+                                {"id": "studyabroad", "title": "✈️ Study Abroad", "description": "USA, UK, Canada, Australia & more"},
+                                {"id": "other", "title": "💬 Something Else", "description": "Any other query"}
                             ]
                         }]
                     }
-                }
-            }
-        )
-
-async def send_buttons(phone: str, body_text: str, buttons: list):
-    button_list = [
-        {"type": "reply", "reply": {"id": btn_id, "title": btn_label}}
-        for btn_label, btn_id in buttons
-    ]
-    async with httpx.AsyncClient() as client:
-        await client.post(
-            f"{BASE_URL}/{PHONE_NUMBER_ID}/messages",
-            headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
-            json={
-                "messaging_product": "whatsapp",
-                "to": phone,
-                "type": "interactive",
-                "interactive": {
-                    "type": "button",
-                    "body": {"text": body_text},
-                    "action": {"buttons": button_list}
                 }
             }
         )
