@@ -213,7 +213,7 @@ async def send_main_menu(phone: str):
                     "action": {
                         "button": "View Options",
                         "sections": [{
-                            "title": "What are you looking for?",
+                            "title": "What are you looking for",
                             "rows": [
                                 {"id": "exams", "title": "Exams", "description": "JEE, NEET, CAT, GUJCET & more"},
                                 {"id": "courses", "title": "Courses and Programs", "description": "B.Tech, MBA, MBBS, B.Com"},
