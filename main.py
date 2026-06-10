@@ -51,7 +51,8 @@ async def handle_text(phone: str, text: str):
     session = user_sessions.get(phone, {"step": "start"})
     step = session.get("step", "start")
 
-    if text_clean.lower() in ["hi", "hello", "hey", "start"] or step == "start":
+    # Always restart on greeting keywords
+    if text_clean.lower() in ["hi", "hello", "hey", "start"]:
         user_sessions[phone] = {"step": "awaiting_name_city"}
         await send_text(phone,
             "Welcome to Collegedunia - India's leading college discovery platform!\n\n"
