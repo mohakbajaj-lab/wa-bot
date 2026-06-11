@@ -24,6 +24,7 @@ user_sessions = {}
 
 async def log_lead(phone, session, query):
     if not SHEETS_WEBHOOK_URL:
+        print("LEAD SKIPPED: SHEETS_WEBHOOK_URL not set")
         return
     category = session.get("step", "").replace("awaiting_", "").replace("_query", "").replace("_", " ")
     payload = {
@@ -34,9 +35,11 @@ async def log_lead(phone, session, query):
         "category": category,
         "query": query,
     }
+    print(f"LEAD SENDING: {payload}")
     try:
-        async with httpx.AsyncClient() as client:
-            await client.post(SHEETS_WEBHOOK_URL, json=payload, timeout=10)
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            r = await client.post(SHEETS_WEBHOOK_URL, json=payload, timeout=10)
+            print(f"LEAD RESPONSE: {r.status_code} - {r.text[:200]}")
     except Exception as e:
         print(f"lead log error: {e}")
 
