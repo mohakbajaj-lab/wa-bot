@@ -21,18 +21,68 @@ SHEETS_SECRET = os.environ.get("SHEETS_SECRET")
 
 user_sessions = {}
 
+# Readable interest labels for menu (list) selections
+INTEREST_LABELS = {
+    # main menu
+    "exams": "Exams", "courses": "Courses", "colleges": "Colleges",
+    "class10": "Class 10th", "class12": "Class 12th",
+    "studyabroad": "Study Abroad", "other": "Other",
+    # course levels
+    "course_ug": "UG Courses", "course_pg": "PG Courses",
+    "course_diploma": "Diploma", "course_other": "Courses - Other",
+    # UG streams
+    "ug_engg": "UG Engineering", "ug_medical": "UG Medical", "ug_mgmt": "UG Management",
+    "ug_law": "UG Law", "ug_arts": "UG Arts & Science", "ug_commerce": "UG Commerce",
+    # PG
+    "pg_mba": "MBA", "pg_mtech": "M.Tech", "pg_mca": "MCA", "pg_msc": "M.Sc",
+    "pg_mcom": "M.Com", "pg_llm": "LLM", "pg_other": "PG - Other",
+    # Diploma
+    "dip_engg": "Diploma Engineering", "dip_design": "Diploma Design",
+    "dip_mgmt": "Diploma Management", "dip_it": "Diploma IT",
+    # exam categories
+    "exam_medical": "Medical Exams", "exam_engg": "Engineering Exams",
+    "exam_mgmt": "Management Exams", "exam_law": "Law Exams",
+    "exam_finance": "Finance Exams", "exam_arts": "Arts Exams",
+    "exam_stream_other": "Exams - Other",
+    # exam leaves
+    "eq_cat": "CAT", "eq_cuet_mgmt": "CUET (Mgmt)", "eq_xat": "XAT", "eq_snap": "SNAP",
+    "eq_cmat": "CMAT", "eq_mgmt_other": "Mgmt Exam - Other",
+    "eq_clat": "CLAT", "eq_ailet": "AILET", "eq_lsat": "LSAT",
+    "eq_mhcet_law": "MH CET Law", "eq_law_other": "Law Exam - Other",
+    "eq_jee_main": "JEE Main", "eq_jee_adv": "JEE Advanced", "eq_bitsat": "BITSAT",
+    "eq_viteee": "VITEEE", "eq_comedk": "COMEDK", "eq_mhtcet": "MHTCET",
+    "eq_wbjee": "WBJEE", "eq_kcet": "KCET", "eq_engg_other": "Engg Exam - Other",
+    "eq_neet_ug": "NEET-UG", "eq_neet_pg": "NEET-PG", "eq_aiims_nursing": "AIIMS Nursing",
+    "eq_ini_cet": "INI-CET", "eq_neet_ss": "NEET-SS", "eq_medical_other": "Medical Exam - Other",
+    "eq_ca": "CA", "eq_cfa": "CFA", "eq_cs": "CS", "eq_cma": "CMA",
+    "eq_finance_other": "Finance Exam - Other",
+    "eq_cuet_arts": "CUET (Arts)", "eq_nid": "NID DAT", "eq_uceed": "UCEED",
+    "eq_nift": "NIFT", "eq_arts_other": "Arts Exam - Other",
+    # college streams
+    "college_engg": "College - Engineering", "college_medical": "College - Medical",
+    "college_mgmt": "College - Management", "college_law": "College - Law",
+    "college_other": "College - Other",
+}
 
-async def log_lead(phone, session, query):
+# Readable interest labels for button selections
+BUTTON_LABELS = {
+    "exam_appearing": "Exams (12th Appearing)",
+    "exam_completed": "Exams (12th Completed)",
+    "college_yes": "College (has one in mind)",
+    "college_no": "College (needs help)",
+}
+
+
+async def log_lead(phone, session, query=""):
     if not SHEETS_WEBHOOK_URL:
         print("LEAD SKIPPED: SHEETS_WEBHOOK_URL not set")
         return
-    category = session.get("step", "").replace("awaiting_", "").replace("_query", "").replace("_", " ")
     payload = {
         "secret": SHEETS_SECRET,
         "phone": phone,
         "name": session.get("name", ""),
         "city": session.get("city", ""),
-        "category": category,
+        "interest": session.get("interest", ""),
         "query": query,
     }
     print(f"LEAD SENDING: {payload}")
@@ -85,7 +135,9 @@ async def handle_text(phone: str, text: str):
     step = session.get("step", "start")
 
     if text_clean.lower() in ["hi", "hello", "hey", "start", "menu"]:
-        user_sessions[phone] = {"step": "awaiting_name_city"}
+        new_session = {"step": "awaiting_name_city"}
+        user_sessions[phone] = new_session
+        await log_lead(phone, new_session)
         await send_text(phone,
             "👋 Welcome to *Collegedunia* — India's leading college discovery platform!\n\n"
             "To help you better, please share your name and city.\n\n"
@@ -96,7 +148,9 @@ async def handle_text(phone: str, text: str):
         parts = [p.strip() for p in text_clean.split(",")]
         name = parts[0] if parts else text_clean
         city = parts[1] if len(parts) > 1 else ""
-        user_sessions[phone] = {"step": "main_menu", "name": name, "city": city}
+        new_session = {"step": "main_menu", "name": name, "city": city}
+        user_sessions[phone] = new_session
+        await log_lead(phone, new_session)
         await send_text(phone, f"Great, {name}! 🎓 Let's find what you're looking for.")
         await send_main_menu(phone)
 
@@ -123,7 +177,8 @@ async def handle_text(phone: str, text: str):
             f"✅ Got it! We've noted your query:\n\n_{text_clean}_\n\n"
             "Our team will get back to you shortly. You can also visit *collegedunia.com* for more info."
         )
-        user_sessions[phone] = {"step": "start"}
+        # keep name/city/interest so a follow-up still maps to the same lead row
+        user_sessions[phone] = {**session, "step": "start"}
         await send_text(phone, "Type *hi* to go back to the main menu. 😊")
 
     else:
@@ -359,6 +414,14 @@ async def handle_list_reply(phone: str, list_id: str):
         user_sessions[phone] = {**session, "step": "awaiting_college_query"}
         await send_text(phone, "📝 Please type your query below.\n\n_Type 'menu' to go back._")
 
+    # --- record interest for EVERY recognised selection ---
+    label = INTEREST_LABELS.get(list_id)
+    if label:
+        sess = user_sessions.get(phone, {})
+        sess["interest"] = label
+        user_sessions[phone] = sess
+        await log_lead(phone, sess)
+
 
 async def handle_button(phone: str, button_id: str):
     session = user_sessions.get(phone, {})
@@ -397,6 +460,14 @@ async def handle_button(phone: str, button_id: str):
 
     else:
         await send_text(phone, "Type *hi* to see the main menu. 😊")
+
+    # --- record interest for recognised button selections ---
+    label = BUTTON_LABELS.get(button_id)
+    if label:
+        sess = user_sessions.get(phone, {})
+        sess["interest"] = label
+        user_sessions[phone] = sess
+        await log_lead(phone, sess)
 
 
 async def send_college_stream_list(phone: str):
