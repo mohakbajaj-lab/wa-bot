@@ -5,11 +5,41 @@ import os
 
 app = FastAPI()
 
+
+@app.get("/")
+async def root():
+    return {"status": "alive"}
+
+
 VERIFY_TOKEN = os.environ["VERIFY_TOKEN"]
 WHATSAPP_TOKEN = os.environ["WHATSAPP_TOKEN"]
 PHONE_NUMBER_ID = os.environ["PHONE_NUMBER_ID"]
 
+# Google Sheets lead logging
+SHEETS_WEBHOOK_URL = os.environ.get("SHEETS_WEBHOOK_URL")
+SHEETS_SECRET = os.environ.get("SHEETS_SECRET")
+
 user_sessions = {}
+
+
+async def log_lead(phone, session, query):
+    if not SHEETS_WEBHOOK_URL:
+        return
+    category = session.get("step", "").replace("awaiting_", "").replace("_query", "").replace("_", " ")
+    payload = {
+        "secret": SHEETS_SECRET,
+        "phone": phone,
+        "name": session.get("name", ""),
+        "city": session.get("city", ""),
+        "category": category,
+        "query": query,
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(SHEETS_WEBHOOK_URL, json=payload, timeout=10)
+    except Exception as e:
+        print(f"lead log error: {e}")
+
 
 @app.get("/webhook")
 async def verify(
@@ -60,8 +90,10 @@ async def handle_text(phone: str, text: str):
         )
 
     elif step == "awaiting_name_city":
-        name = text_clean.split(",")[0].strip()
-        user_sessions[phone] = {"step": "main_menu", "name": name}
+        parts = [p.strip() for p in text_clean.split(",")]
+        name = parts[0] if parts else text_clean
+        city = parts[1] if len(parts) > 1 else ""
+        user_sessions[phone] = {"step": "main_menu", "name": name, "city": city}
         await send_text(phone, f"Great, {name}! 🎓 Let's find what you're looking for.")
         await send_main_menu(phone)
 
@@ -83,6 +115,7 @@ async def handle_text(phone: str, text: str):
         "awaiting_studyabroad_query",
         "awaiting_other_query",
     ]:
+        await log_lead(phone, session, text_clean)
         await send_text(phone,
             f"✅ Got it! We've noted your query:\n\n_{text_clean}_\n\n"
             "Our team will get back to you shortly. You can also visit *collegedunia.com* for more info."
