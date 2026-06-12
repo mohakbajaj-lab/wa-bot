@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import PlainTextResponse
 import httpx
 import os
+import re
 
 app = FastAPI()
 
@@ -20,6 +21,31 @@ SHEETS_WEBHOOK_URL = os.environ.get("SHEETS_WEBHOOK_URL")
 SHEETS_SECRET = os.environ.get("SHEETS_SECRET")
 
 user_sessions = {}
+
+# ---------- greeting detection ----------
+_GREETINGS = {
+    "hi", "hello", "helo", "hey", "hlo", "hii", "yo", "hola", "namaste",
+    "start", "menu", "sup", "greetings", "hothere", "hithere",
+}
+_GREETING_STEMS = {"hi", "helo", "hey", "hlo", "yo", "hola", "start", "menu", "sup", "namaste"}
+
+
+def is_greeting(text: str) -> bool:
+    raw = text.strip().lower()
+    if not raw:
+        return False
+    words = raw.split()
+    first = re.sub(r"[^a-z]", "", words[0]) if words else ""
+    full = re.sub(r"[^a-z]", "", raw)
+    for cand in (full, first):
+        if not cand:
+            continue
+        if cand in _GREETINGS:
+            return True
+        if re.sub(r"(.)\1+", r"\1", cand) in _GREETING_STEMS:
+            return True
+    return False
+
 
 # Readable interest labels for menu (list) selections
 INTEREST_LABELS = {
@@ -68,9 +94,44 @@ INTEREST_LABELS = {
 BUTTON_LABELS = {
     "exam_appearing": "Exams (12th Appearing)",
     "exam_completed": "Exams (12th Completed)",
+    "college_appearing": "College (12th Appearing)",
+    "college_completed": "College (12th Completed)",
     "college_yes": "College (has one in mind)",
     "college_no": "College (needs help)",
 }
+
+# Specific exam leaves that should trigger the "have you given the exam?" question
+EXAM_GIVEN_LEAVES = [
+    "eq_cat", "eq_cuet_mgmt", "eq_xat", "eq_snap", "eq_cmat",
+    "eq_clat", "eq_ailet", "eq_lsat", "eq_mhcet_law",
+    "eq_jee_main", "eq_jee_adv", "eq_bitsat", "eq_viteee", "eq_comedk",
+    "eq_mhtcet", "eq_wbjee", "eq_kcet",
+    "eq_neet_ug", "eq_neet_pg", "eq_aiims_nursing", "eq_ini_cet", "eq_neet_ss",
+    "eq_ca", "eq_cfa", "eq_cs", "eq_cma",
+    "eq_cuet_arts", "eq_nid", "eq_uceed", "eq_nift",
+]
+
+# "Something else" exam leaves -> straight to free text
+EXAM_OTHER_LEAVES = [
+    "eq_mgmt_other", "eq_law_other", "eq_engg_other",
+    "eq_medical_other", "eq_finance_other", "eq_arts_other",
+]
+
+# All free-text query steps (logged as leads + reassured)
+QUERY_STEPS = [
+    "awaiting_exam_appearing_query",
+    "awaiting_exam_stream_query",
+    "awaiting_exam_given_query",
+    "awaiting_exam_notgiven_query",
+    "awaiting_course_query",
+    "awaiting_college_query",
+    "awaiting_college_appearing_query",
+    "awaiting_college_detail_query",
+    "awaiting_class10_query",
+    "awaiting_class12_query",
+    "awaiting_studyabroad_query",
+    "awaiting_other_query",
+]
 
 
 async def log_lead(phone, session, query=""):
@@ -134,13 +195,14 @@ async def handle_text(phone: str, text: str):
     session = user_sessions.get(phone, {"step": "start"})
     step = session.get("step", "start")
 
-    if text_clean.lower() in ["hi", "hello", "hey", "start", "menu"]:
+    if is_greeting(text_clean):
         new_session = {"step": "awaiting_name_city"}
         user_sessions[phone] = new_session
         await log_lead(phone, new_session)
         await send_text(phone,
             "👋 Welcome to *Collegedunia* — India's leading college discovery platform!\n\n"
-            "To help you better, please share your name and city.\n\n"
+            "To help you better, please share your *name and city*.\n\n"
+            "🔒 Your details are safe with us and used only to connect you with the right counsellor.\n\n"
             "📝 Example: Rahul, Delhi"
         )
 
@@ -155,29 +217,29 @@ async def handle_text(phone: str, text: str):
         await send_main_menu(phone)
 
     elif step == "awaiting_college_name":
-        user_sessions[phone] = {**session, "step": "awaiting_college_budget", "college_name": text_clean}
-        await send_text(phone, "💰 What is your budget for the *entire course duration*?\n\n_Type 'menu' to go back._")
+        college = text_clean
+        user_sessions[phone] = {**session, "step": "awaiting_college_detail_query", "college_name": college}
+        await send_text(phone,
+            f"📋 Great! For *{college}*, please share in ONE message:\n\n"
+            "• Your 12th board & percentage\n"
+            "• Entrance exam name & marks/rank (if given)\n"
+            f"• How exactly we can help you with {college}\n\n"
+            "_Type 'menu' to go back._"
+        )
 
     elif step == "awaiting_college_budget":
         user_sessions[phone] = {**session, "step": "awaiting_college_stream", "budget": text_clean}
         await send_college_stream_list(phone)
 
-    elif step in [
-        "awaiting_exam_appearing_query",
-        "awaiting_exam_stream_query",
-        "awaiting_course_query",
-        "awaiting_college_query",
-        "awaiting_class10_query",
-        "awaiting_class12_query",
-        "awaiting_studyabroad_query",
-        "awaiting_other_query",
-    ]:
-        await log_lead(phone, session, text_clean)
+    elif step in QUERY_STEPS:
+        query_text = text_clean
+        if session.get("college_name"):
+            query_text = f"[College: {session['college_name']}] {text_clean}"
+        await log_lead(phone, session, query_text)
         await send_text(phone,
             f"✅ Got it! We've noted your query:\n\n_{text_clean}_\n\n"
-            "Our team will get back to you shortly. You can also visit *collegedunia.com* for more info."
+            "Our *counsellors* will get back to you shortly. You can also visit *collegedunia.com* for more info."
         )
-        # keep name/city/interest so a follow-up still maps to the same lead row
         user_sessions[phone] = {**session, "step": "start"}
         await send_text(phone, "Type *hi* to go back to the main menu. 😊")
 
@@ -211,10 +273,11 @@ async def handle_list_reply(phone: str, list_id: str):
         )
 
     elif list_id == "colleges":
-        user_sessions[phone] = {**session, "step": "awaiting_college_mind"}
+        # NEW: colleges now starts with 12th appearing / completed (same as exams)
+        user_sessions[phone] = {**session, "step": "awaiting_college_status"}
         await send_buttons(phone,
-            "🏫 Do you have a college in mind?",
-            [("Yes, I do 👍", "college_yes"), ("No, help me 🔍", "college_no")]
+            "🏫 Are you currently appearing for 12th or have you completed it?",
+            [("12th Appearing 📖", "college_appearing"), ("12th Completed ✅", "college_completed")]
         )
 
     elif list_id == "class10":
@@ -241,7 +304,7 @@ async def handle_list_reply(phone: str, list_id: str):
     elif list_id == "other":
         user_sessions[phone] = {**session, "step": "awaiting_other_query"}
         await send_text(phone,
-            "🔍 *Something Else*\n\nPlease type your query and our team will help you out!\n\n_Type 'menu' to go back._"
+            "🔍 *Something Else*\n\nPlease type your query and our counsellors will help you out!\n\n_Type 'menu' to go back._"
         )
 
     # --- COURSES: UG ---
@@ -396,16 +459,16 @@ async def handle_list_reply(phone: str, list_id: str):
         user_sessions[phone] = {**session, "step": "awaiting_exam_stream_query"}
         await send_text(phone, "📝 Please type your exam-related query below.\n\n_Type 'menu' to go back._")
 
-    # --- ALL EXAM LEAF NODES → free text ---
-    elif list_id in [
-        "eq_cat", "eq_cuet_mgmt", "eq_xat", "eq_snap", "eq_cmat", "eq_mgmt_other",
-        "eq_clat", "eq_ailet", "eq_lsat", "eq_mhcet_law", "eq_law_other",
-        "eq_jee_main", "eq_jee_adv", "eq_bitsat", "eq_viteee", "eq_comedk",
-        "eq_mhtcet", "eq_wbjee", "eq_kcet", "eq_engg_other",
-        "eq_neet_ug", "eq_neet_pg", "eq_aiims_nursing", "eq_ini_cet", "eq_neet_ss", "eq_medical_other",
-        "eq_ca", "eq_cfa", "eq_cs", "eq_cma", "eq_finance_other",
-        "eq_cuet_arts", "eq_nid", "eq_uceed", "eq_nift", "eq_arts_other",
-    ]:
+    # --- SPECIFIC EXAM LEAVES → ask "have you given the exam?" ---
+    elif list_id in EXAM_GIVEN_LEAVES:
+        user_sessions[phone] = {**session, "step": "awaiting_exam_given_status"}
+        await send_buttons(phone,
+            "📝 Have you already given this exam?",
+            [("Yes, I have ✅", "exam_given_yes"), ("No, not yet 📝", "exam_given_no")]
+        )
+
+    # --- "SOMETHING ELSE" EXAM LEAVES → free text ---
+    elif list_id in EXAM_OTHER_LEAVES:
         user_sessions[phone] = {**session, "step": "awaiting_exam_stream_query"}
         await send_text(phone, "📝 Please type your query below.\n\n_Type 'menu' to go back._")
 
@@ -426,11 +489,13 @@ async def handle_list_reply(phone: str, list_id: str):
 async def handle_button(phone: str, button_id: str):
     session = user_sessions.get(phone, {})
 
+    # --- EXAMS: 12th appearing / completed ---
     if button_id == "exam_appearing":
+        # Q3: appearing students skip the "given exam?" question -> straight to free text
         user_sessions[phone] = {**session, "step": "awaiting_exam_appearing_query"}
         await send_text(phone,
             "📖 *Exams — 12th Appearing*\n\nPlease type your exam-related query below.\n\n"
-            "Example: JEE Main 2025 registration, NEET eligibility, exam dates\n\n_Type 'menu' to go back._"
+            "Example: JEE Main registration, NEET eligibility, exam dates\n\n_Type 'menu' to go back._"
         )
 
     elif button_id == "exam_completed":
@@ -448,6 +513,38 @@ async def handle_button(phone: str, button_id: str):
                 {"id": "exam_arts", "title": "🎨 Arts", "description": "CUET, NID DAT, NIFT & more"},
                 {"id": "exam_stream_other", "title": "🔍 Something Else", "description": "Any other exam"},
             ]
+        )
+
+    # --- EXAMS: have you given the exam? ---
+    elif button_id == "exam_given_yes":
+        user_sessions[phone] = {**session, "step": "awaiting_exam_given_query"}
+        await send_text(phone,
+            "✅ Great! Please share in ONE message:\n\n"
+            "• Your rank / percentile / marks (out of total)\n"
+            "• A short description of your query\n\n"
+            "_Type 'menu' to go back._"
+        )
+
+    elif button_id == "exam_given_no":
+        user_sessions[phone] = {**session, "step": "awaiting_exam_notgiven_query"}
+        await send_text(phone,
+            "📝 No problem! Please type your query below.\n\n"
+            "Example: eligibility, exam dates, preparation, expected cutoffs\n\n_Type 'menu' to go back._"
+        )
+
+    # --- COLLEGES: 12th appearing / completed ---
+    elif button_id == "college_appearing":
+        user_sessions[phone] = {**session, "step": "awaiting_college_appearing_query"}
+        await send_text(phone,
+            "📖 *Colleges — 12th Appearing*\n\nPlease type your college-related query below.\n\n"
+            "Example: Best colleges after 12th, admission process, fees\n\n_Type 'menu' to go back._"
+        )
+
+    elif button_id == "college_completed":
+        user_sessions[phone] = {**session, "step": "awaiting_college_mind"}
+        await send_buttons(phone,
+            "🏫 Do you have a college in mind?",
+            [("Yes, I do 👍", "college_yes"), ("No, help me 🔍", "college_no")]
         )
 
     elif button_id == "college_yes":
