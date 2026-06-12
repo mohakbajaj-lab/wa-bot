@@ -236,12 +236,15 @@ async def handle_text(phone: str, text: str):
         if session.get("college_name"):
             query_text = f"[College: {session['college_name']}] {text_clean}"
         await log_lead(phone, session, query_text)
-        await send_text(phone,
-            f"✅ Got it! We've noted your query:\n\n_{text_clean}_\n\n"
-            "Our *counsellors* will get back to you shortly. You can also visit *collegedunia.com* for more info."
+        await send_cta_url(phone,
+            "🙏 *Thank you for reaching out to Collegedunia!*\n\n"
+            "Your response has been recorded and our counselling team will get back to you very soon.\n\n"
+            "In the meantime, feel free to explore our website 👇",
+            "Visit Website",
+            "https://collegedunia.com"
         )
         user_sessions[phone] = {**session, "step": "start"}
-        await send_text(phone, "Type *hi* to go back to the main menu. 😊")
+        await send_text(phone, "Type *hi* anytime to start again. 😊")
 
     else:
         await send_text(phone, "Type *hi* to see the main menu. 😊")
@@ -521,6 +524,7 @@ async def handle_button(phone: str, button_id: str):
         await send_text(phone,
             "✅ Great! Please share in ONE message:\n\n"
             "• Your rank / percentile / marks (out of total)\n"
+            "• A college you have in mind (if any)\n"
             "• A short description of your query\n\n"
             "_Type 'menu' to go back._"
         )
@@ -644,6 +648,28 @@ async def send_list(phone: str, header: str, body_text: str, button_label: str, 
             }
         )
         print(f"send_list response: {response.status_code} - {response.text}")
+
+
+async def send_cta_url(phone: str, body_text: str, button_text: str, url: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{BASE_URL}/{PHONE_NUMBER_ID}/messages",
+            headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "interactive",
+                "interactive": {
+                    "type": "cta_url",
+                    "body": {"text": body_text},
+                    "action": {
+                        "name": "cta_url",
+                        "parameters": {"display_text": button_text, "url": url}
+                    }
+                }
+            }
+        )
+        print(f"send_cta_url response: {response.status_code} - {response.text}")
 
 
 async def send_main_menu(phone: str):
