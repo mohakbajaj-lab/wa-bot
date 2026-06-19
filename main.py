@@ -31,13 +31,9 @@ URL_STUDY_ABROAD = "https://collegedunia.com/study-abroad"
 # ---------- greeting detection ----------
 _GREETINGS = {
     "hi", "hello", "helo", "hey", "hlo", "hii", "yo", "hola", "namaste",
-    "start", "sup", "greetings", "hothere", "hithere",
+    "start", "menu", "sup", "greetings", "hothere", "hithere",
 }
-_GREETING_STEMS = {"hi", "helo", "hey", "hlo", "yo", "hola", "start", "sup", "namaste"}
-
-# ---------- navigation command words ----------
-_MAIN_MENU_WORDS = {"menu", "mainmenu", "main menu", "home"}
-_BACK_WORDS = {"back", "go back", "goback", "previous", "prev"}
+_GREETING_STEMS = {"hi", "helo", "hey", "hlo", "yo", "hola", "start", "menu", "sup", "namaste"}
 
 
 def is_greeting(text: str) -> bool:
@@ -151,12 +147,6 @@ QUERY_STEPS = [
     "awaiting_other_query",
 ]
 
-# Steps where the user is typing free text (back = go to parent menu, do NOT pop)
-PROMPT_STEPS = set(QUERY_STEPS) | {"awaiting_college_name", "awaiting_college_budget"}
-
-# Flows that should NOT receive the predictor + india-colleges links on completion
-NO_EXTRA_LINK_STEPS = {"awaiting_class10_query", "awaiting_studyabroad_query"}
-
 
 async def log_lead(phone, session, query=""):
     if not SHEETS_WEBHOOK_URL:
@@ -179,247 +169,32 @@ async def log_lead(phone, session, query=""):
         print(f"lead log error: {e}")
 
 
-# =========================================================================
-#  NAVIGATION HELPERS
-# =========================================================================
+async def send_completion(phone: str, step: str):
+    """Send the closing message + the right links for the flow."""
+    thank = (
+        "🙏 *Thank you for reaching out to Collegedunia!*\n\n"
+        "Your response has been recorded and our counselling team will get back to you very soon."
+    )
 
-NAV_BACK = ("⬅️ Back", "nav_back")
-NAV_MAIN = ("🏠 Main Menu", "nav_main")
-BACK_ROW = {"id": "nav_back", "title": "⬅️ Back", "description": "Go to the previous menu"}
-MAIN_HINT = "\n\n🏠 Type *menu* anytime for the main menu."
+    if step == "awaiting_studyabroad_query":
+        await send_cta_url(phone,
+            thank + "\n\nExplore the best study abroad options below 👇",
+            "Explore Study Abroad", URL_STUDY_ABROAD)
 
-
-def with_back_btn(buttons):
-    """Append a tappable Back button to a button screen if there is room (max 3)."""
-    buttons = list(buttons)
-    if len(buttons) < 3:
-        buttons.append(NAV_BACK)
-    return buttons
-
-
-def with_back_row(rows):
-    """Append a tappable Back row to a list screen if under WhatsApp's 10-row limit."""
-    rows = list(rows)
-    if len(rows) < 10:
-        rows.append(BACK_ROW)
-    return rows
-
-
-async def send_prompt(phone, body):
-    """A free-text prompt that still shows tappable Back + Main Menu buttons.
-    The user can type their answer OR tap a navigation button."""
-    await send_buttons(phone, body, [NAV_BACK, NAV_MAIN])
-
-
-async def go_main(phone, session):
-    session["nav"] = ["main"]
-    session["step"] = "main_menu"
-    user_sessions[phone] = session
-    await send_main_menu(phone)
-
-
-async def go_to(phone, session, screen):
-    """Navigate forward to a menu screen and remember it on the nav stack."""
-    nav = session.setdefault("nav", ["main"])
-    if not nav or nav[-1] != screen:
-        nav.append(screen)
-    session["nav"] = nav
-    session["step"] = "menu"
-    user_sessions[phone] = session
-    await render_screen(phone, screen, session)
-
-
-async def nav_back(phone, session):
-    """Handle a Back action from any screen."""
-    nav = session.get("nav", ["main"])
-    step = session.get("step", "")
-    if step in PROMPT_STEPS:
-        # Currently typing -> return to the menu that led here (don't pop)
-        target = nav[-1] if nav else "main"
-    else:
-        # On a menu -> drop current, show the previous one
-        if len(nav) > 1:
-            nav.pop()
-        target = nav[-1] if nav else "main"
-    session["nav"] = nav
-    user_sessions[phone] = session
-    if target == "main":
-        await go_main(phone, session)
-    else:
-        session["step"] = "menu"
-        user_sessions[phone] = session
-        await render_screen(phone, target, session)
-
-
-# =========================================================================
-#  MENU DATA
-# =========================================================================
-
-COURSE_LEVEL_ROWS = [
-    {"id": "course_ug", "title": "🎓 Undergraduate", "description": "B.Tech, MBBS, BBA, B.Com & more"},
-    {"id": "course_pg", "title": "📚 Postgraduate", "description": "MBA, M.Tech, MCA, M.Sc & more"},
-    {"id": "course_diploma", "title": "📋 Diploma", "description": "Polytechnic, Design, IT & more"},
-    {"id": "course_other", "title": "🔍 Something Else", "description": "Any other course query"},
-]
-
-COURSE_UG_ROWS = [
-    {"id": "ug_engg", "title": "⚙️ Engineering", "description": "B.Tech, B.E & more"},
-    {"id": "ug_medical", "title": "🏥 Medical", "description": "MBBS, BDS, BAMS & more"},
-    {"id": "ug_mgmt", "title": "💼 Management", "description": "BBA, BMS & more"},
-    {"id": "ug_law", "title": "⚖️ Law", "description": "BA LLB, BBA LLB & more"},
-    {"id": "ug_arts", "title": "🎨 Arts & Science", "description": "BA, B.Sc & more"},
-    {"id": "ug_commerce", "title": "📊 Commerce", "description": "B.Com, CA & more"},
-]
-
-COURSE_PG_ROWS = [
-    {"id": "pg_mba", "title": "💼 MBA", "description": "MBA & PGDM programs"},
-    {"id": "pg_mtech", "title": "⚙️ M.Tech", "description": "M.Tech, M.E programs"},
-    {"id": "pg_mca", "title": "💻 MCA", "description": "Master of Computer Applications"},
-    {"id": "pg_msc", "title": "🔬 M.Sc", "description": "M.Sc programs"},
-    {"id": "pg_mcom", "title": "📊 M.Com", "description": "Master of Commerce"},
-    {"id": "pg_llm", "title": "⚖️ LLM", "description": "Master of Law"},
-    {"id": "pg_other", "title": "🔍 Something Else", "description": "Any other PG program"},
-]
-
-COURSE_DIP_ROWS = [
-    {"id": "dip_engg", "title": "⚙️ Engineering & Polytechnic", "description": "Polytechnic diploma programs"},
-    {"id": "dip_design", "title": "🎨 Creative & Design", "description": "Design, animation & arts"},
-    {"id": "dip_mgmt", "title": "💼 Management & Business", "description": "Business diploma programs"},
-    {"id": "dip_it", "title": "💻 IT & Tech", "description": "Computer & tech programs"},
-]
-
-EXAM_STREAM_ROWS = [
-    {"id": "exam_medical", "title": "🏥 Medical", "description": "NEET-UG, NEET-PG & more"},
-    {"id": "exam_engg", "title": "⚙️ Engineering", "description": "JEE Main, Advanced, BITSAT & more"},
-    {"id": "exam_mgmt", "title": "💼 Management", "description": "CAT, XAT, SNAP & more"},
-    {"id": "exam_law", "title": "⚖️ Law", "description": "CLAT, AILET & more"},
-    {"id": "exam_finance", "title": "📊 Finance", "description": "CA, CFA, CS, CMA & more"},
-    {"id": "exam_arts", "title": "🎨 Arts", "description": "CUET, NID DAT, NIFT & more"},
-    {"id": "exam_stream_other", "title": "🔍 Something Else", "description": "Any other exam"},
-]
-
-COLLEGE_STREAM_ROWS = [
-    {"id": "college_engg", "title": "⚙️ Engineering", "description": "B.Tech, B.E colleges"},
-    {"id": "college_medical", "title": "🏥 Medical", "description": "MBBS, BDS, BAMS colleges"},
-    {"id": "college_mgmt", "title": "💼 Management", "description": "MBA, BBA colleges"},
-    {"id": "college_law", "title": "⚖️ Law", "description": "LLB, BA LLB colleges"},
-    {"id": "college_other", "title": "🔍 Something Else", "description": "Any other stream"},
-]
-
-# category screen_id -> (header, body, rows)
-EXAM_LISTS = {
-    "exam_mgmt": ("💼 Management Exams", "Select an exam:", [
-        {"id": "eq_cat", "title": "CAT", "description": "Common Admission Test"},
-        {"id": "eq_cuet_mgmt", "title": "CUET", "description": "Common University Entrance Test"},
-        {"id": "eq_xat", "title": "XAT", "description": "Xavier Aptitude Test"},
-        {"id": "eq_snap", "title": "SNAP", "description": "Symbiosis National Aptitude Test"},
-        {"id": "eq_cmat", "title": "CMAT", "description": "Common Management Admission Test"},
-        {"id": "eq_mgmt_other", "title": "🔍 Something Else", "description": "Any other management exam"},
-    ]),
-    "exam_law": ("⚖️ Law Exams", "Select an exam:", [
-        {"id": "eq_clat", "title": "CLAT", "description": "Common Law Admission Test"},
-        {"id": "eq_ailet", "title": "AILET", "description": "All India Law Entrance Test"},
-        {"id": "eq_lsat", "title": "LSAT", "description": "Law School Admission Test"},
-        {"id": "eq_mhcet_law", "title": "MH CET Law", "description": "Maharashtra Law CET"},
-        {"id": "eq_law_other", "title": "🔍 Something Else", "description": "Any other law exam"},
-    ]),
-    "exam_engg": ("⚙️ Engineering Exams", "Select an exam:", [
-        {"id": "eq_jee_main", "title": "JEE Main", "description": "Joint Entrance Exam Main"},
-        {"id": "eq_jee_adv", "title": "JEE Advanced", "description": "Joint Entrance Exam Advanced"},
-        {"id": "eq_bitsat", "title": "BITSAT", "description": "BITS Pilani Admission Test"},
-        {"id": "eq_viteee", "title": "VITEEE", "description": "VIT Engineering Entrance"},
-        {"id": "eq_comedk", "title": "COMEDK", "description": "Karnataka Engineering Exam"},
-        {"id": "eq_mhtcet", "title": "MHTCET", "description": "Maharashtra CET"},
-        {"id": "eq_wbjee", "title": "WBJEE", "description": "West Bengal JEE"},
-        {"id": "eq_kcet", "title": "KCET", "description": "Karnataka CET"},
-        {"id": "eq_engg_other", "title": "🔍 Something Else", "description": "Any other engineering exam"},
-    ]),
-    "exam_medical": ("🏥 Medical Exams", "Select an exam:", [
-        {"id": "eq_neet_ug", "title": "NEET-UG", "description": "National Eligibility cum Entrance Test UG"},
-        {"id": "eq_neet_pg", "title": "NEET-PG", "description": "National Eligibility cum Entrance Test PG"},
-        {"id": "eq_aiims_nursing", "title": "AIIMS B.Sc Nursing", "description": "AIIMS Nursing Entrance"},
-        {"id": "eq_ini_cet", "title": "INI-CET", "description": "Institute of National Importance CET"},
-        {"id": "eq_neet_ss", "title": "NEET-SS", "description": "NEET Super Speciality"},
-        {"id": "eq_medical_other", "title": "🔍 Something Else", "description": "Any other medical exam"},
-    ]),
-    "exam_finance": ("📊 Finance Exams", "Select an exam:", [
-        {"id": "eq_ca", "title": "CA", "description": "Chartered Accountancy"},
-        {"id": "eq_cfa", "title": "CFA", "description": "Chartered Financial Analyst"},
-        {"id": "eq_cs", "title": "CS", "description": "Company Secretary"},
-        {"id": "eq_cma", "title": "CMA", "description": "Cost Management Accountant"},
-        {"id": "eq_finance_other", "title": "🔍 Something Else", "description": "Any other finance exam"},
-    ]),
-    "exam_arts": ("🎨 Arts Exams", "Select an exam:", [
-        {"id": "eq_cuet_arts", "title": "CUET", "description": "Common University Entrance Test"},
-        {"id": "eq_nid", "title": "NID DAT", "description": "National Institute of Design"},
-        {"id": "eq_uceed", "title": "UCEED", "description": "Undergraduate Common Entrance Exam for Design"},
-        {"id": "eq_nift", "title": "NIFT Entrance", "description": "National Institute of Fashion Technology"},
-        {"id": "eq_arts_other", "title": "🔍 Something Else", "description": "Any other arts exam"},
-    ]),
-}
-
-
-async def render_screen(phone, screen, session):
-    """Re-render any navigable menu screen (used by forward nav and Back)."""
-    if screen == "main":
-        await go_main(phone, session)
-
-    elif screen == "course_levels":
-        await send_list(phone, "🎓 Courses & Programs", "Select your level of study:",
-                        "Select", with_back_row(COURSE_LEVEL_ROWS))
-
-    elif screen == "course_ug":
-        await send_list(phone, "🎓 Undergraduate", "Select a stream:",
-                        "Select", with_back_row(COURSE_UG_ROWS))
-
-    elif screen == "course_pg":
-        await send_list(phone, "📚 Postgraduate", "Select a program:",
-                        "Select", with_back_row(COURSE_PG_ROWS))
-
-    elif screen == "course_diploma":
-        await send_list(phone, "📋 Diploma", "Select a category:",
-                        "Select", with_back_row(COURSE_DIP_ROWS))
-
-    elif screen == "exam_status":
-        await send_buttons(phone,
-            "📚 Are you currently appearing for 12th or have you completed it?" + MAIN_HINT,
-            with_back_btn([("12th Appearing 📖", "exam_appearing"), ("12th Completed ✅", "exam_completed")]))
-
-    elif screen == "exam_stream":
-        await send_list(phone, "✅ Exams — 12th Completed", "Select an exam category:",
-                        "Select", with_back_row(EXAM_STREAM_ROWS))
-
-    elif screen in EXAM_LISTS:
-        header, body, rows = EXAM_LISTS[screen]
-        await send_list(phone, header, body, "Select", with_back_row(rows))
-
-    elif screen == "exam_given_status":
-        await send_buttons(phone,
-            "📝 Have you already given this exam?" + MAIN_HINT,
-            with_back_btn([("Yes, I have ✅", "exam_given_yes"), ("No, not yet 📝", "exam_given_no")]))
-
-    elif screen == "college_status":
-        await send_buttons(phone,
-            "🏫 Are you currently appearing for 12th or have you completed it?" + MAIN_HINT,
-            with_back_btn([("12th Appearing 📖", "college_appearing"), ("12th Completed ✅", "college_completed")]))
-
-    elif screen == "college_mind":
-        await send_buttons(phone,
-            "🏫 Do you have a college in mind?" + MAIN_HINT,
-            with_back_btn([("Yes, I do 👍", "college_yes"), ("No, help me 🔍", "college_no")]))
-
-    elif screen == "college_stream":
-        await send_list(phone, "🏫 Colleges", "Select a stream:",
-                        "Select", with_back_row(COLLEGE_STREAM_ROWS))
-
-    elif screen == "course_exam_status":
-        course = session.get("course_name", "this program")
-        await send_buttons(phone,
-            f"📝 *{course}* — Have you given any exam?" + MAIN_HINT,
-            with_back_btn([("Yes, I have ✅", "course_exam_yes"), ("No, not yet 📝", "course_exam_no")]))
+    elif step == "awaiting_class10_query":
+        await send_cta_url(phone,
+            thank + "\n\nIn the meantime, feel free to explore our website 👇",
+            "Visit Website", URL_WEBSITE)
 
     else:
-        await go_main(phone, session)
+        await send_text(phone,
+            thank + "\n\n"
+            "🎯 Tap here to visit the best-in-class college predictor for top universities and exams:\n"
+            f"{URL_PREDICTOR}\n\n"
+            "🏛️ Tap here to view the best colleges in India in 2026:\n"
+            f"{URL_INDIA_COLLEGES}\n\n"
+            "🌐 Explore our website:\n"
+            f"{URL_WEBSITE}")
 
 
 @app.get("/webhook")
@@ -458,48 +233,10 @@ async def receive_message(request: Request):
     return {"status": "ok"}
 
 
-async def send_completion(phone: str, session: dict, step: str):
-    """Send the closing message + the right links for the flow."""
-    thank = (
-        "🙏 *Thank you for reaching out to Collegedunia!*\n\n"
-        "Your response has been recorded and our counselling team will get back to you very soon."
-    )
-
-    if step == "awaiting_studyabroad_query":
-        await send_cta_url(phone,
-            thank + "\n\nExplore the best study abroad options below 👇",
-            "Explore Study Abroad", URL_STUDY_ABROAD)
-
-    elif step == "awaiting_class10_query":
-        await send_cta_url(phone,
-            thank + "\n\nIn the meantime, feel free to explore our website 👇",
-            "Visit Website", URL_WEBSITE)
-
-    else:
-        await send_text(phone,
-            thank + "\n\n"
-            "🎯 Tap here to visit the best-in-class college predictor for top universities and exams:\n"
-            f"{URL_PREDICTOR}\n\n"
-            "🏛️ Tap here to view the best colleges in India in 2026:\n"
-            f"{URL_INDIA_COLLEGES}\n\n"
-            "🌐 Explore our website:\n"
-            f"{URL_WEBSITE}")
-
-
 async def handle_text(phone: str, text: str):
     text_clean = text.strip()
-    lower = text_clean.lower()
     session = user_sessions.get(phone, {"step": "start"})
     step = session.get("step", "start")
-
-    # --- NAVIGATION COMMANDS (typed) ---
-    if lower in _MAIN_MENU_WORDS and session.get("name"):
-        await go_main(phone, session)
-        return
-
-    if lower in _BACK_WORDS and session.get("name"):
-        await nav_back(phone, session)
-        return
 
     if is_greeting(text_clean):
         new_session = {"step": "awaiting_name_city"}
@@ -516,7 +253,7 @@ async def handle_text(phone: str, text: str):
         parts = [p.strip() for p in text_clean.split(",")]
         name = parts[0] if parts else text_clean
         city = parts[1] if len(parts) > 1 else ""
-        new_session = {"step": "main_menu", "name": name, "city": city, "nav": ["main"]}
+        new_session = {"step": "main_menu", "name": name, "city": city}
         user_sessions[phone] = new_session
         await log_lead(phone, new_session)
         await send_text(phone, f"Great, {name}! 🎓 Let's find what you're looking for.")
@@ -525,25 +262,25 @@ async def handle_text(phone: str, text: str):
     elif step == "awaiting_college_name":
         college = text_clean
         user_sessions[phone] = {**session, "step": "awaiting_college_detail_query", "college_name": college}
-        await send_prompt(phone,
+        await send_text(phone,
             f"📋 Great! For *{college}*, please share in ONE message:\n\n"
             "• Your 12th board & percentage\n"
             "• Entrance exam name & marks/rank (if given)\n"
-            f"• How exactly we can help you with {college}"
+            f"• How exactly we can help you with {college}\n\n"
+            "_Type 'menu' to go back._"
         )
 
     elif step == "awaiting_college_budget":
-        session = {**session, "budget": text_clean}
-        user_sessions[phone] = session
-        await go_to(phone, session, "college_stream")
+        user_sessions[phone] = {**session, "step": "awaiting_college_stream", "budget": text_clean}
+        await send_college_stream_list(phone)
 
     elif step in QUERY_STEPS:
         query_text = text_clean
         if session.get("college_name"):
             query_text = f"[College: {session['college_name']}] {text_clean}"
         await log_lead(phone, session, query_text)
-        await send_completion(phone, session, step)
-        user_sessions[phone] = {**session, "step": "start", "nav": ["main"]}
+        await send_completion(phone, step)
+        user_sessions[phone] = {**session, "step": "start"}
         await send_text(phone, "Type *hi* anytime to start again. 😊")
 
     else:
@@ -553,92 +290,233 @@ async def handle_text(phone: str, text: str):
 async def handle_list_reply(phone: str, list_id: str):
     session = user_sessions.get(phone, {})
 
-    # --- NAVIGATION ---
-    if list_id == "nav_back":
-        await nav_back(phone, session)
-        return
-    if list_id == "nav_main":
-        await go_main(phone, session)
-        return
-
     # --- MAIN MENU ---
     if list_id == "exams":
-        await go_to(phone, session, "exam_status")
+        user_sessions[phone] = {**session, "step": "awaiting_exam_status"}
+        await send_buttons(phone,
+            "📚 Are you currently appearing for 12th or have you completed it?",
+            [("12th Appearing 📖", "exam_appearing"), ("12th Completed ✅", "exam_completed")]
+        )
 
     elif list_id == "courses":
-        await go_to(phone, session, "course_levels")
+        user_sessions[phone] = {**session, "step": "awaiting_course_level"}
+        await send_list(phone,
+            "🎓 Courses & Programs",
+            "Select your level of study:",
+            "Select",
+            [
+                {"id": "course_ug", "title": "🎓 Undergraduate", "description": "B.Tech, MBBS, BBA, B.Com & more"},
+                {"id": "course_pg", "title": "📚 Postgraduate", "description": "MBA, M.Tech, MCA, M.Sc & more"},
+                {"id": "course_diploma", "title": "📋 Diploma", "description": "Polytechnic, Design, IT & more"},
+                {"id": "course_other", "title": "🔍 Something Else", "description": "Any other course query"},
+            ]
+        )
 
     elif list_id == "colleges":
-        await go_to(phone, session, "college_status")
+        user_sessions[phone] = {**session, "step": "awaiting_college_status"}
+        await send_buttons(phone,
+            "🏫 Are you currently appearing for 12th or have you completed it?",
+            [("12th Appearing 📖", "college_appearing"), ("12th Completed ✅", "college_completed")]
+        )
 
     elif list_id == "class10":
         user_sessions[phone] = {**session, "step": "awaiting_class10_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             "📘 *Class 10th*\n\nPlease type your query below.\n\n"
-            "Example: Stream selection, best schools, scholarships"
+            "Example: Stream selection, best schools, scholarships\n\n_Type 'menu' to go back._"
         )
 
     elif list_id == "class12":
         user_sessions[phone] = {**session, "step": "awaiting_class12_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             "📗 *Class 12th*\n\nPlease type your query below.\n\n"
-            "Example: Colleges accepting 12th marks, direct admission, cutoffs"
+            "Example: Colleges accepting 12th marks, direct admission, cutoffs\n\n_Type 'menu' to go back._"
         )
 
     elif list_id == "studyabroad":
         user_sessions[phone] = {**session, "step": "awaiting_studyabroad_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             "✈️ *Study Abroad*\n\nPlease type your query below.\n\n"
-            "Example: MS in USA, MBA in UK, scholarships for Indian students"
+            "Example: MS in USA, MBA in UK, scholarships for Indian students\n\n_Type 'menu' to go back._"
         )
 
     elif list_id == "other":
         user_sessions[phone] = {**session, "step": "awaiting_other_query"}
-        await send_prompt(phone,
-            "🔍 *Something Else*\n\nPlease type your query and our counsellors will help you out!"
+        await send_text(phone,
+            "🔍 *Something Else*\n\nPlease type your query and our counsellors will help you out!\n\n_Type 'menu' to go back._"
         )
 
-    # --- COURSES: level sub-lists ---
+    # --- COURSES: UG ---
     elif list_id == "course_ug":
-        await go_to(phone, session, "course_ug")
+        await send_list(phone,
+            "🎓 Undergraduate",
+            "Select a stream:",
+            "Select",
+            [
+                {"id": "ug_engg", "title": "⚙️ Engineering", "description": "B.Tech, B.E & more"},
+                {"id": "ug_medical", "title": "🏥 Medical", "description": "MBBS, BDS, BAMS & more"},
+                {"id": "ug_mgmt", "title": "💼 Management", "description": "BBA, BMS & more"},
+                {"id": "ug_law", "title": "⚖️ Law", "description": "BA LLB, BBA LLB & more"},
+                {"id": "ug_arts", "title": "🎨 Arts & Science", "description": "BA, B.Sc & more"},
+                {"id": "ug_commerce", "title": "📊 Commerce", "description": "B.Com, CA & more"},
+            ]
+        )
 
+    # --- COURSES: PG ---
     elif list_id == "course_pg":
-        await go_to(phone, session, "course_pg")
+        await send_list(phone,
+            "📚 Postgraduate",
+            "Select a program:",
+            "Select",
+            [
+                {"id": "pg_mba", "title": "💼 MBA", "description": "MBA & PGDM programs"},
+                {"id": "pg_mtech", "title": "⚙️ M.Tech", "description": "M.Tech, M.E programs"},
+                {"id": "pg_mca", "title": "💻 MCA", "description": "Master of Computer Applications"},
+                {"id": "pg_msc", "title": "🔬 M.Sc", "description": "M.Sc programs"},
+                {"id": "pg_mcom", "title": "📊 M.Com", "description": "Master of Commerce"},
+                {"id": "pg_llm", "title": "⚖️ LLM", "description": "Master of Law"},
+                {"id": "pg_other", "title": "🔍 Something Else", "description": "Any other PG program"},
+            ]
+        )
 
+    # --- COURSES: DIPLOMA ---
     elif list_id == "course_diploma":
-        await go_to(phone, session, "course_diploma")
+        await send_list(phone,
+            "📋 Diploma",
+            "Select a category:",
+            "Select",
+            [
+                {"id": "dip_engg", "title": "⚙️ Engineering & Polytechnic", "description": "Polytechnic diploma programs"},
+                {"id": "dip_design", "title": "🎨 Creative & Design", "description": "Design, animation & arts"},
+                {"id": "dip_mgmt", "title": "💼 Management & Business", "description": "Business diploma programs"},
+                {"id": "dip_it", "title": "💻 IT & Tech", "description": "Computer & tech programs"},
+            ]
+        )
 
     elif list_id == "course_other":
         user_sessions[phone] = {**session, "step": "awaiting_course_query"}
-        await send_prompt(phone, "🔍 Please type your course-related query below.")
+        await send_text(phone, "🔍 Please type your course-related query below.\n\n_Type 'menu' to go back._")
 
     # --- COURSE LEAVES → ask "have you given any exam?" ---
     elif list_id in COURSE_LEAVES:
-        session = {**session, "course_name": INTEREST_LABELS.get(list_id, "this program")}
-        user_sessions[phone] = session
-        await go_to(phone, session, "course_exam_status")
+        user_sessions[phone] = {**session, "step": "awaiting_course_exam_status", "course_name": INTEREST_LABELS.get(list_id, "")}
+        await send_buttons(phone,
+            "📝 Have you given any exam?",
+            [("Yes, I have ✅", "course_exam_yes"), ("No, not yet 📝", "course_exam_no")]
+        )
 
-    # --- EXAMS: category lists ---
-    elif list_id in EXAM_LISTS:
-        await go_to(phone, session, list_id)
+    # --- EXAMS: 12TH COMPLETED STREAM ---
+    elif list_id == "exam_mgmt":
+        await send_list(phone,
+            "💼 Management Exams",
+            "Select an exam:",
+            "Select",
+            [
+                {"id": "eq_cat", "title": "CAT", "description": "Common Admission Test"},
+                {"id": "eq_cuet_mgmt", "title": "CUET", "description": "Common University Entrance Test"},
+                {"id": "eq_xat", "title": "XAT", "description": "Xavier Aptitude Test"},
+                {"id": "eq_snap", "title": "SNAP", "description": "Symbiosis National Aptitude Test"},
+                {"id": "eq_cmat", "title": "CMAT", "description": "Common Management Admission Test"},
+                {"id": "eq_mgmt_other", "title": "🔍 Something Else", "description": "Any other management exam"},
+            ]
+        )
+
+    elif list_id == "exam_law":
+        await send_list(phone,
+            "⚖️ Law Exams",
+            "Select an exam:",
+            "Select",
+            [
+                {"id": "eq_clat", "title": "CLAT", "description": "Common Law Admission Test"},
+                {"id": "eq_ailet", "title": "AILET", "description": "All India Law Entrance Test"},
+                {"id": "eq_lsat", "title": "LSAT", "description": "Law School Admission Test"},
+                {"id": "eq_mhcet_law", "title": "MH CET Law", "description": "Maharashtra Law CET"},
+                {"id": "eq_law_other", "title": "🔍 Something Else", "description": "Any other law exam"},
+            ]
+        )
+
+    elif list_id == "exam_engg":
+        await send_list(phone,
+            "⚙️ Engineering Exams",
+            "Select an exam:",
+            "Select",
+            [
+                {"id": "eq_jee_main", "title": "JEE Main", "description": "Joint Entrance Exam Main"},
+                {"id": "eq_jee_adv", "title": "JEE Advanced", "description": "Joint Entrance Exam Advanced"},
+                {"id": "eq_bitsat", "title": "BITSAT", "description": "BITS Pilani Admission Test"},
+                {"id": "eq_viteee", "title": "VITEEE", "description": "VIT Engineering Entrance"},
+                {"id": "eq_comedk", "title": "COMEDK", "description": "Karnataka Engineering Exam"},
+                {"id": "eq_mhtcet", "title": "MHTCET", "description": "Maharashtra CET"},
+                {"id": "eq_wbjee", "title": "WBJEE", "description": "West Bengal JEE"},
+                {"id": "eq_kcet", "title": "KCET", "description": "Karnataka CET"},
+                {"id": "eq_engg_other", "title": "🔍 Something Else", "description": "Any other engineering exam"},
+            ]
+        )
+
+    elif list_id == "exam_medical":
+        await send_list(phone,
+            "🏥 Medical Exams",
+            "Select an exam:",
+            "Select",
+            [
+                {"id": "eq_neet_ug", "title": "NEET-UG", "description": "National Eligibility cum Entrance Test UG"},
+                {"id": "eq_neet_pg", "title": "NEET-PG", "description": "National Eligibility cum Entrance Test PG"},
+                {"id": "eq_aiims_nursing", "title": "AIIMS B.Sc Nursing", "description": "AIIMS Nursing Entrance"},
+                {"id": "eq_ini_cet", "title": "INI-CET", "description": "Institute of National Importance CET"},
+                {"id": "eq_neet_ss", "title": "NEET-SS", "description": "NEET Super Speciality"},
+                {"id": "eq_medical_other", "title": "🔍 Something Else", "description": "Any other medical exam"},
+            ]
+        )
+
+    elif list_id == "exam_finance":
+        await send_list(phone,
+            "📊 Finance Exams",
+            "Select an exam:",
+            "Select",
+            [
+                {"id": "eq_ca", "title": "CA", "description": "Chartered Accountancy"},
+                {"id": "eq_cfa", "title": "CFA", "description": "Chartered Financial Analyst"},
+                {"id": "eq_cs", "title": "CS", "description": "Company Secretary"},
+                {"id": "eq_cma", "title": "CMA", "description": "Cost Management Accountant"},
+                {"id": "eq_finance_other", "title": "🔍 Something Else", "description": "Any other finance exam"},
+            ]
+        )
+
+    elif list_id == "exam_arts":
+        await send_list(phone,
+            "🎨 Arts Exams",
+            "Select an exam:",
+            "Select",
+            [
+                {"id": "eq_cuet_arts", "title": "CUET", "description": "Common University Entrance Test"},
+                {"id": "eq_nid", "title": "NID DAT", "description": "National Institute of Design"},
+                {"id": "eq_uceed", "title": "UCEED", "description": "Undergraduate Common Entrance Exam for Design"},
+                {"id": "eq_nift", "title": "NIFT Entrance", "description": "National Institute of Fashion Technology"},
+                {"id": "eq_arts_other", "title": "🔍 Something Else", "description": "Any other arts exam"},
+            ]
+        )
 
     elif list_id == "exam_stream_other":
         user_sessions[phone] = {**session, "step": "awaiting_exam_stream_query"}
-        await send_prompt(phone, "📝 Please type your exam-related query below.")
+        await send_text(phone, "📝 Please type your exam-related query below.\n\n_Type 'menu' to go back._")
 
     # --- SPECIFIC EXAM LEAVES → ask "have you given the exam?" ---
     elif list_id in EXAM_GIVEN_LEAVES:
-        await go_to(phone, session, "exam_given_status")
+        user_sessions[phone] = {**session, "step": "awaiting_exam_given_status"}
+        await send_buttons(phone,
+            "📝 Have you already given this exam?",
+            [("Yes, I have ✅", "exam_given_yes"), ("No, not yet 📝", "exam_given_no")]
+        )
 
     # --- "SOMETHING ELSE" EXAM LEAVES → free text ---
     elif list_id in EXAM_OTHER_LEAVES:
         user_sessions[phone] = {**session, "step": "awaiting_exam_stream_query"}
-        await send_prompt(phone, "📝 Please type your query below.")
+        await send_text(phone, "📝 Please type your query below.\n\n_Type 'menu' to go back._")
 
     # --- COLLEGES STREAM (after budget) ---
     elif list_id in ["college_engg", "college_medical", "college_mgmt", "college_law", "college_other"]:
         user_sessions[phone] = {**session, "step": "awaiting_college_query"}
-        await send_prompt(phone, "📝 Please type your query below.")
+        await send_text(phone, "📝 Please type your query below.\n\n_Type 'menu' to go back._")
 
     # --- record interest for EVERY recognised selection ---
     label = INTEREST_LABELS.get(list_id)
@@ -652,78 +530,90 @@ async def handle_list_reply(phone: str, list_id: str):
 async def handle_button(phone: str, button_id: str):
     session = user_sessions.get(phone, {})
 
-    # --- NAVIGATION ---
-    if button_id == "nav_back":
-        await nav_back(phone, session)
-        return
-    if button_id == "nav_main":
-        await go_main(phone, session)
-        return
-
     # --- EXAMS: 12th appearing / completed ---
     if button_id == "exam_appearing":
         # appearing students skip the "given exam?" question -> straight to free text
         user_sessions[phone] = {**session, "step": "awaiting_exam_appearing_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             "📖 *Exams — 12th Appearing*\n\nPlease type your exam-related query below.\n\n"
-            "Example: JEE Main registration, NEET eligibility, exam dates"
+            "Example: JEE Main registration, NEET eligibility, exam dates\n\n_Type 'menu' to go back._"
         )
 
     elif button_id == "exam_completed":
-        await go_to(phone, session, "exam_stream")
+        user_sessions[phone] = {**session, "step": "awaiting_exam_stream"}
+        await send_list(phone,
+            "✅ Exams — 12th Completed",
+            "Select an exam category:",
+            "Select",
+            [
+                {"id": "exam_medical", "title": "🏥 Medical", "description": "NEET-UG, NEET-PG & more"},
+                {"id": "exam_engg", "title": "⚙️ Engineering", "description": "JEE Main, Advanced, BITSAT & more"},
+                {"id": "exam_mgmt", "title": "💼 Management", "description": "CAT, XAT, SNAP & more"},
+                {"id": "exam_law", "title": "⚖️ Law", "description": "CLAT, AILET & more"},
+                {"id": "exam_finance", "title": "📊 Finance", "description": "CA, CFA, CS, CMA & more"},
+                {"id": "exam_arts", "title": "🎨 Arts", "description": "CUET, NID DAT, NIFT & more"},
+                {"id": "exam_stream_other", "title": "🔍 Something Else", "description": "Any other exam"},
+            ]
+        )
 
     # --- EXAMS: have you given the exam? ---
     elif button_id == "exam_given_yes":
         user_sessions[phone] = {**session, "step": "awaiting_exam_given_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             "✅ Great! Please share in ONE message:\n\n"
             "• Your rank / percentile / marks (out of total)\n"
             "• A college you have in mind (if any)\n"
-            "• A short description of your query"
+            "• A short description of your query\n\n"
+            "_Type 'menu' to go back._"
         )
 
     elif button_id == "exam_given_no":
         user_sessions[phone] = {**session, "step": "awaiting_exam_notgiven_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             "📝 No problem! Please type your query below.\n\n"
-            "Example: eligibility, exam dates, preparation, expected cutoffs"
+            "Example: eligibility, exam dates, preparation, expected cutoffs\n\n_Type 'menu' to go back._"
         )
 
     # --- COURSES: have you given any exam? ---
     elif button_id == "course_exam_yes":
         course = session.get("course_name", "this program")
         user_sessions[phone] = {**session, "step": "awaiting_course_given_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             f"✅ Great! For *{course}*, please share in ONE message:\n\n"
             "• The exam you gave (related to this course/program)\n"
             "• Your marks / percentile / percentage (if results are out)\n"
-            "• A college you have in mind (if any)"
+            "• A college you have in mind (if any)\n\n"
+            "_Type 'menu' to go back._"
         )
 
     elif button_id == "course_exam_no":
         user_sessions[phone] = {**session, "step": "awaiting_course_query"}
-        await send_prompt(phone,
-            "📝 No problem! Please enter your query related to this program."
+        await send_text(phone,
+            "📝 No problem! Please enter your query related to this program.\n\n_Type 'menu' to go back._"
         )
 
     # --- COLLEGES: 12th appearing / completed ---
     elif button_id == "college_appearing":
         user_sessions[phone] = {**session, "step": "awaiting_college_appearing_query"}
-        await send_prompt(phone,
+        await send_text(phone,
             "📖 *Colleges — 12th Appearing*\n\nPlease type your college-related query below.\n\n"
-            "Example: Best colleges after 12th, admission process, fees"
+            "Example: Best colleges after 12th, admission process, fees\n\n_Type 'menu' to go back._"
         )
 
     elif button_id == "college_completed":
-        await go_to(phone, session, "college_mind")
+        user_sessions[phone] = {**session, "step": "awaiting_college_mind"}
+        await send_buttons(phone,
+            "🏫 Do you have a college in mind?",
+            [("Yes, I do 👍", "college_yes"), ("No, help me 🔍", "college_no")]
+        )
 
     elif button_id == "college_yes":
         user_sessions[phone] = {**session, "step": "awaiting_college_name"}
-        await send_prompt(phone, "🏫 Please type the name of the college.")
+        await send_text(phone, "🏫 Please type the name of the college.\n\n_Type 'menu' to go back._")
 
     elif button_id == "college_no":
         user_sessions[phone] = {**session, "step": "awaiting_college_budget"}
-        await send_prompt(phone, "💰 What is your budget for the *entire course duration*?")
+        await send_text(phone, "💰 What is your budget for the *entire course duration*?\n\n_Type 'menu' to go back._")
 
     else:
         await send_text(phone, "Type *hi* to see the main menu. 😊")
@@ -735,6 +625,21 @@ async def handle_button(phone: str, button_id: str):
         sess["interest"] = label
         user_sessions[phone] = sess
         await log_lead(phone, sess)
+
+
+async def send_college_stream_list(phone: str):
+    await send_list(phone,
+        "🏫 Colleges",
+        "Select a stream:",
+        "Select",
+        [
+            {"id": "college_engg", "title": "⚙️ Engineering", "description": "B.Tech, B.E colleges"},
+            {"id": "college_medical", "title": "🏥 Medical", "description": "MBBS, BDS, BAMS colleges"},
+            {"id": "college_mgmt", "title": "💼 Management", "description": "MBA, BBA colleges"},
+            {"id": "college_law", "title": "⚖️ Law", "description": "LLB, BA LLB colleges"},
+            {"id": "college_other", "title": "🔍 Something Else", "description": "Any other stream"},
+        ]
+    )
 
 
 BASE_URL = "https://graph.facebook.com/v19.0"
@@ -791,7 +696,7 @@ async def send_list(phone: str, header: str, body_text: str, button_label: str, 
                     "type": "list",
                     "header": {"type": "text", "text": header},
                     "body": {"text": body_text},
-                    "footer": {"text": "🏠 Type 'menu' for main menu • ⬅️ Back below"},
+                    "footer": {"text": "Type 'menu' to go back anytime"},
                     "action": {
                         "button": button_label,
                         "sections": [{"title": "Options", "rows": rows}]
