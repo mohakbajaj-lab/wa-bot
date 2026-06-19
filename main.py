@@ -117,6 +117,13 @@ EXAM_OTHER_LEAVES = [
     "eq_medical_other", "eq_finance_other", "eq_arts_other",
 ]
 
+# Course leaves that should trigger the "have you given any exam?" question
+COURSE_LEAVES = [
+    "ug_engg", "ug_medical", "ug_mgmt", "ug_law", "ug_arts", "ug_commerce",
+    "pg_mba", "pg_mtech", "pg_mca", "pg_msc", "pg_mcom", "pg_llm", "pg_other",
+    "dip_engg", "dip_design", "dip_mgmt", "dip_it",
+]
+
 # All free-text query steps (logged as leads + reassured)
 QUERY_STEPS = [
     "awaiting_exam_appearing_query",
@@ -124,6 +131,7 @@ QUERY_STEPS = [
     "awaiting_exam_given_query",
     "awaiting_exam_notgiven_query",
     "awaiting_course_query",
+    "awaiting_course_given_query",
     "awaiting_college_query",
     "awaiting_college_appearing_query",
     "awaiting_college_detail_query",
@@ -361,11 +369,13 @@ async def handle_list_reply(phone: str, list_id: str):
         user_sessions[phone] = {**session, "step": "awaiting_course_query"}
         await send_text(phone, "🔍 Please type your course-related query below.\n\n_Type 'menu' to go back._")
 
-    elif list_id in ["ug_engg", "ug_medical", "ug_mgmt", "ug_law", "ug_arts", "ug_commerce",
-                     "pg_mba", "pg_mtech", "pg_mca", "pg_msc", "pg_mcom", "pg_llm", "pg_other",
-                     "dip_engg", "dip_design", "dip_mgmt", "dip_it"]:
-        user_sessions[phone] = {**session, "step": "awaiting_course_query"}
-        await send_text(phone, "📝 Please type your query below.\n\n_Type 'menu' to go back._")
+    # --- COURSE LEAVES → ask "have you given any exam?" ---
+    elif list_id in COURSE_LEAVES:
+        user_sessions[phone] = {**session, "step": "awaiting_course_exam_status", "course_name": INTEREST_LABELS.get(list_id, "")}
+        await send_buttons(phone,
+            "📝 Have you given any exam?",
+            [("Yes, I have ✅", "course_exam_yes"), ("No, not yet 📝", "course_exam_no")]
+        )
 
     # --- EXAMS: 12TH COMPLETED STREAM ---
     elif list_id == "exam_mgmt":
@@ -534,6 +544,24 @@ async def handle_button(phone: str, button_id: str):
         await send_text(phone,
             "📝 No problem! Please type your query below.\n\n"
             "Example: eligibility, exam dates, preparation, expected cutoffs\n\n_Type 'menu' to go back._"
+        )
+
+    # --- COURSES: have you given any exam? ---
+    elif button_id == "course_exam_yes":
+        course = session.get("course_name", "this program")
+        user_sessions[phone] = {**session, "step": "awaiting_course_given_query"}
+        await send_text(phone,
+            f"✅ Great! For *{course}*, please share in ONE message:\n\n"
+            "• The exam you gave (related to this course/program)\n"
+            "• Your marks / percentile / percentage (if results are out)\n"
+            "• A college you have in mind (if any)\n\n"
+            "_Type 'menu' to go back._"
+        )
+
+    elif button_id == "course_exam_no":
+        user_sessions[phone] = {**session, "step": "awaiting_course_query"}
+        await send_text(phone,
+            "📝 No problem! Please enter your query related to this program.\n\n_Type 'menu' to go back._"
         )
 
     # --- COLLEGES: 12th appearing / completed ---
